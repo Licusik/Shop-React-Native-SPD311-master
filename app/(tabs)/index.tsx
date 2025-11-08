@@ -1,11 +1,11 @@
 import React from "react";
 import { StyleSheet } from "react-native";
-import TemperamentTest from '../components/TemperamentTest';
+import TodoList from "../components/TodoList";
 
 export default function Index() {
   return (
-      <TemperamentTest />
-      
+    <TodoList />
+    // <TemperamentTest />
   );
 }
 
