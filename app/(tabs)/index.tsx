@@ -1,11 +1,13 @@
 import React from "react";
 import { StyleSheet } from "react-native";
-import TodoList from "../components/TodoList";
+import Protocol from "../components/Protocol";
 
 export default function Index() {
   return (
-    <TodoList />
+    //<TodoList />
+    <Protocol />
     // <TemperamentTest />
+    
   );
 }
 
