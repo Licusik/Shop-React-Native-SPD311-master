@@ -1,16 +1,17 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Modal,
-    SafeAreaView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Modal,
+  SafeAreaView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 interface Todo {
@@ -20,6 +21,8 @@ interface Todo {
   userId: number;
 }
 
+const STORAGE_KEY = '@todolist_todos';
+
 const TodoList = () => {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,21 +31,54 @@ const TodoList = () => {
   const [newTodoText, setNewTodoText] = useState('');
 
   useEffect(() => {
-    fetchTodos();
+    loadTodos();
   }, []);
 
-  const fetchTodos = async () => {
+  useEffect(() => {
+    if (!loading && todos.length >= 0) {
+      saveTodos();
+    }
+  }, [todos, loading]);
+
+  const loadTodos = async () => {
     try {
       setLoading(true);
       setError(null);
+      
+      const storedTodos = await AsyncStorage.getItem(STORAGE_KEY);
+      
+      if (storedTodos !== null) {
+        const parsedTodos = JSON.parse(storedTodos);
+        setTodos(parsedTodos);
+      } else {
+        await fetchTodosFromAPI();
+      }
+    } catch (err) {
+      setError('Помилка завантаження завдань');
+      console.error('Load error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveTodos = async () => {
+    try {
+      const jsonValue = JSON.stringify(todos);
+      await AsyncStorage.setItem(STORAGE_KEY, jsonValue);
+    } catch (err) {
+      console.error('Save error:', err);
+      Alert.alert('Помилка', 'Не вдалося зберегти завдання');
+    }
+  };
+
+  const fetchTodosFromAPI = async () => {
+    try {
       const response = await fetch('https://dummyjson.com/todos');
       const data = await response.json();
       setTodos(data.todos);
     } catch (err) {
-      setError('Помилка завантаження завдань');
-      console.error(err);
-    } finally {
-      setLoading(false);
+      setError('Помилка завантаження завдань з API');
+      console.error('API error:', err);
     }
   };
 
@@ -76,6 +112,52 @@ const TodoList = () => {
     setTodos(prevTodos => prevTodos.filter(todo => todo.id !== id));
   };
 
+  const clearAllTodos = () => {
+    Alert.alert(
+      'Очистити всі завдання',
+      'Ви впевнені? Ця дія незворотна.',
+      [
+        { text: 'Скасувати', style: 'cancel' },
+        {
+          text: 'Очистити',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await AsyncStorage.removeItem(STORAGE_KEY);
+              setTodos([]);
+            } catch (err) {
+              console.error('Clear error:', err);
+              Alert.alert('Помилка', 'Не вдалося очистити завдання');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const reloadFromAPI = () => {
+    Alert.alert(
+      'Перезавантажити дані',
+      'Це замінить всі поточні завдання даними з API',
+      [
+        { text: 'Скасувати', style: 'cancel' },
+        {
+          text: 'Перезавантажити',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              await fetchTodosFromAPI();
+            } catch (err) {
+              setError('Помилка завантаження');
+            } finally {
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const renderItem = ({ item }: { item: Todo }) => (
     <View style={styles.todoItemContainer}>
       <TouchableOpacity
@@ -101,9 +183,7 @@ const TodoList = () => {
             {item.todo}
           </Text>
         </View>
-        <Text style={styles.todoTime}>
-          {Math.floor(Math.random() * 12) + 1} pm
-        </Text>
+        <Text style={styles.todoId}>#{item.id}</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={styles.deleteButton}
@@ -116,9 +196,9 @@ const TodoList = () => {
 
   const renderHeader = () => (
     <View style={styles.header}>
-      <Text style={styles.headerTitle}>ODOT List</Text>
+      <Text style={styles.headerTitle}>TODO List</Text>
       <Text style={styles.headerDate}>
-        {new Date().toLocaleDateString('en-GB', {
+        {new Date().toLocaleDateString('uk-UA', {
           day: 'numeric',
           month: 'long',
           year: 'numeric',
@@ -127,6 +207,20 @@ const TodoList = () => {
       <Text style={styles.headerStats}>
         Всього: {todos.length} | Виконано: {todos.filter(t => t.completed).length}
       </Text>
+      <View style={styles.headerButtons}>
+        <TouchableOpacity 
+          style={styles.headerButton}
+          onPress={reloadFromAPI}
+        >
+          <Text style={styles.headerButtonText}>🔄 Завантажити з API</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.headerButton, styles.headerButtonDanger]}
+          onPress={clearAllTodos}
+        >
+          <Text style={styles.headerButtonText}>🗑️ Очистити все</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
@@ -153,7 +247,7 @@ const TodoList = () => {
       <SafeAreaView style={styles.container}>
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={fetchTodos}>
+          <TouchableOpacity style={styles.retryButton} onPress={loadTodos}>
             <Text style={styles.retryButtonText}>Спробувати знову</Text>
           </TouchableOpacity>
         </View>
@@ -268,6 +362,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#5B7FFF',
     marginTop: 4,
+    marginBottom: 16,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  headerButton: {
+    flex: 1,
+    backgroundColor: '#3A3A3C',
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  headerButtonDanger: {
+    backgroundColor: '#5C1A1A',
+  },
+  headerButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
   },
   todoItemContainer: {
     flexDirection: 'row',
@@ -317,9 +431,9 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
     color: '#8E8E93',
   },
-  todoTime: {
-    fontSize: 14,
-    color: '#8E8E93',
+  todoId: {
+    fontSize: 12,
+    color: '#636366',
     marginLeft: 8,
   },
   deleteButton: {
