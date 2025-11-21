@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -13,45 +12,34 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-
-interface Todo {
-  id: number;
-  todo: string;
-  completed: boolean;
-  userId: number;
-}
-
-const STORAGE_KEY = '@todolist_todos';
+import { getDatabase } from "../database/db";
+import type { Todo } from "../models/Todo";
 
 const TodoList = () => {
   const [todos, setTodos] = useState<Todo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [newTodoText, setNewTodoText] = useState('');
-
+  const [modalVisible, setModalVisible] = useState<boolean>(false);
+  const [newTodoText, setNewTodoText] = useState<string>('');
+  
   useEffect(() => {
     loadTodos();
   }, []);
 
-  useEffect(() => {
-    if (!loading && todos.length >= 0) {
-      saveTodos();
-    }
-  }, [todos, loading]);
-
-  const loadTodos = async () => {
+  const loadTodos = async (): Promise<void> => {
     try {
       setLoading(true);
       setError(null);
       
-      const storedTodos = await AsyncStorage.getItem(STORAGE_KEY);
+      const db = await getDatabase();
+      const result = (await db.getAllAsync(
+        "SELECT * FROM todos ORDER BY created_at DESC"
+      )) as Todo[];
       
-      if (storedTodos !== null) {
-        const parsedTodos = JSON.parse(storedTodos);
-        setTodos(parsedTodos);
-      } else {
+      if (result.length === 0) {
         await fetchTodosFromAPI();
+      } else {
+        setTodos(result);
       }
     } catch (err) {
       setError('Помилка завантаження завдань');
@@ -61,58 +49,81 @@ const TodoList = () => {
     }
   };
 
-  const saveTodos = async () => {
-    try {
-      const jsonValue = JSON.stringify(todos);
-      await AsyncStorage.setItem(STORAGE_KEY, jsonValue);
-    } catch (err) {
-      console.error('Save error:', err);
-      Alert.alert('Помилка', 'Не вдалося зберегти завдання');
-    }
-  };
-
-  const fetchTodosFromAPI = async () => {
+  const fetchTodosFromAPI = async (): Promise<void> => {
     try {
       const response = await fetch('https://dummyjson.com/todos');
       const data = await response.json();
-      setTodos(data.todos);
+      
+      const db = await getDatabase();
+      
+      await db.runAsync('DELETE FROM todos');
+      
+      for (const todo of data.todos) {
+        await db.runAsync(
+          'INSERT INTO todos (id, text, completed) VALUES (?, ?, ?)',
+          todo.id,
+          todo.todo,
+          todo.completed ? 1 : 0
+        );
+      }
+      
+      await loadTodos();
     } catch (err) {
       setError('Помилка завантаження завдань з API');
       console.error('API error:', err);
     }
   };
 
-  const toggleTodo = (id: number) => {
-    setTodos(prevTodos =>
-      prevTodos.map(todo =>
-        todo.id === id ? { ...todo, completed: !todo.completed } : todo
-      )
-    );
+  const toggleTodo = async (id: number, completed: number): Promise<void> => {
+    try {
+      const db = await getDatabase();
+      await db.runAsync(
+        'UPDATE todos SET completed = ? WHERE id = ?',
+        completed === 0 ? 1 : 0,
+        id
+      );
+      await loadTodos();
+    } catch (err) {
+      console.error('Toggle error:', err);
+      Alert.alert('Помилка', 'Не вдалося оновити завдання');
+    }
   };
 
-  const addTodo = () => {
+  const addTodo = async (): Promise<void> => {
     if (newTodoText.trim() === '') {
       Alert.alert('Помилка', 'Введіть текст завдання');
       return;
     }
 
-    const newTodo: Todo = {
-      id: Date.now(),
-      todo: newTodoText.trim(),
-      completed: false,
-      userId: 1,
-    };
-
-    setTodos(prevTodos => [newTodo, ...prevTodos]);
-    setNewTodoText('');
-    setModalVisible(false);
+    try {
+      const db = await getDatabase();
+      await db.runAsync(
+        'INSERT INTO todos (text, completed) VALUES (?, ?)',
+        newTodoText.trim(),
+        0
+      );
+      
+      setNewTodoText('');
+      setModalVisible(false);
+      await loadTodos();
+    } catch (err) {
+      console.error('Add error:', err);
+      Alert.alert('Помилка', 'Не вдалося додати завдання');
+    }
   };
 
-  const deleteTodo = (id: number) => {
-    setTodos(prevTodos => prevTodos.filter(todo => todo.id !== id));
+  const deleteTodo = async (id: number): Promise<void> => {
+    try {
+      const db = await getDatabase();
+      await db.runAsync('DELETE FROM todos WHERE id = ?', id);
+      await loadTodos();
+    } catch (err) {
+      console.error('Delete error:', err);
+      Alert.alert('Помилка', 'Не вдалося видалити завдання');
+    }
   };
 
-  const clearAllTodos = () => {
+  const clearAllTodos = (): void => {
     Alert.alert(
       'Очистити всі завдання',
       'Ви впевнені? Ця дія незворотна.',
@@ -123,8 +134,9 @@ const TodoList = () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await AsyncStorage.removeItem(STORAGE_KEY);
-              setTodos([]);
+              const db = await getDatabase();
+              await db.runAsync('DELETE FROM todos');
+              await loadTodos();
             } catch (err) {
               console.error('Clear error:', err);
               Alert.alert('Помилка', 'Не вдалося очистити завдання');
@@ -135,7 +147,7 @@ const TodoList = () => {
     );
   };
 
-  const reloadFromAPI = () => {
+  const reloadFromAPI = (): void => {
     Alert.alert(
       'Перезавантажити дані',
       'Це замінить всі поточні завдання даними з API',
@@ -158,29 +170,29 @@ const TodoList = () => {
     );
   };
 
-  const renderItem = ({ item }: { item: Todo }) => (
+  const renderItem = ({ item }: { item: Todo }): React.ReactElement => (
     <View style={styles.todoItemContainer}>
       <TouchableOpacity
         style={styles.todoItem}
-        onPress={() => toggleTodo(item.id)}
+        onPress={() => toggleTodo(item.id, item.completed)}
         activeOpacity={0.7}
       >
         <View style={styles.todoContent}>
           <View
             style={[
               styles.checkbox,
-              item.completed && styles.checkboxCompleted,
+              item.completed === 1 && styles.checkboxCompleted,
             ]}
           >
-            {item.completed && <Text style={styles.checkmark}>✓</Text>}
+            {item.completed === 1 && <Text style={styles.checkmark}>✓</Text>}
           </View>
           <Text
             style={[
               styles.todoText,
-              item.completed && styles.todoTextCompleted,
+              item.completed === 1 && styles.todoTextCompleted,
             ]}
           >
-            {item.todo}
+            {item.text}
           </Text>
         </View>
         <Text style={styles.todoId}>#{item.id}</Text>
@@ -194,7 +206,7 @@ const TodoList = () => {
     </View>
   );
 
-  const renderHeader = () => (
+  const renderHeader = (): React.ReactElement => (
     <View style={styles.header}>
       <Text style={styles.headerTitle}>TODO List</Text>
       <Text style={styles.headerDate}>
@@ -205,7 +217,7 @@ const TodoList = () => {
         })}
       </Text>
       <Text style={styles.headerStats}>
-        Всього: {todos.length} | Виконано: {todos.filter(t => t.completed).length}
+        Всього: {todos.length} | Виконано: {todos.filter(t => t.completed === 1).length}
       </Text>
       <View style={styles.headerButtons}>
         <TouchableOpacity 
@@ -224,7 +236,7 @@ const TodoList = () => {
     </View>
   );
 
-  const renderEmpty = () => (
+  const renderEmpty = (): React.ReactElement => (
     <View style={styles.emptyContainer}>
       <Text style={styles.emptyText}>Немає завдань</Text>
       <Text style={styles.emptySubtext}>Натисніть + щоб додати нове</Text>
